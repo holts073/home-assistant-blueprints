@@ -1,257 +1,160 @@
 blueprint:
-  name: ILG Werktijd Tracker met Pauze en Notificaties
-  description: |
-    Houd werktijden bij op basis van zone aanwezigheid met pauze timeout,
-    stuurt notificaties, schrijft in kalender en houdt weektotaal bij.
+  name: ILG Werktijd Tracking
+  description: Houdt werktijden bij op basis van aanwezigheid in een zone met pauzetimer, notificaties, weektotaal en kalendernotities.
   domain: automation
   input:
     telefoon:
-      name: Telefoon entity (device_tracker of person)
-      description: Kies je telefoon device_tracker of person entity.
+      name: Telefoon entity (device_tracker)
+      description: Kies je telefoon device_tracker entity.
       selector:
         entity:
           domain: device_tracker
-          entity_category: device
-    werkzone:
-      name: Werk zone
+
+    werk_zone:
+      name: Werkzone
       description: Zone die je werkplek representeert.
       selector:
         entity:
           domain: zone
-    notificatie_primair:
-      name: Primair notificatie kanaal
-      description: Waar notificaties naar toe moeten.
+
+    notificatie_1:
+      name: Hoofd notificatie ontvanger
+      description: Eerste notificatie kanaal.
       selector:
         action: {}
-    notificatie_secundair:
-      name: Secundair notificatie kanaal (optioneel)
-      description: Tweede notificatie kanaal, mag leeg zijn.
+
+    notificatie_2:
+      name: Tweede notificatie ontvanger (optioneel)
+      description: Tweede notificatie kanaal, leeg laten als niet gebruikt.
       default: null
       selector:
         action: {}
+
     calendar_werktijden:
-      name: Werktijden calendar
-      description: Calendar om begintijd, eindtijd en dagtotaal in te zetten.
+      name: Kalender om werktijden in te noteren
+      description: Kalender entity waarin begin- en eindtijden worden bijgehouden.
       selector:
         entity:
           domain: calendar
-    werktijd_dagduur:
-      name: Verwachte werktijd per dag (uur)
-      description: Duur van je normale werkdag in uren.
-      default: 8.5
-      selector:
-        number:
-          min: 0
-          max: 24
-          step: 0.1
-          unit_of_measurement: h
-    pauze_timeout:
+
+    pauze_timeout_minuten:
       name: Pauze timeout (minuten)
-      description: Hoe lang mag je weg uit de zone zonder werkdag te beëindigen.
+      description: Hoe lang mag je buiten de werkzone zijn zonder werkdag te beëindigen.
       default: 30
       selector:
         number:
           min: 1
-          max: 180
-          unit_of_measurement: min
-    werktijd_meld_drempel:
-      name: Notificatie na (uur)
-      description: Na hoeveel uur aanwezigheid je een notificatie wilt ontvangen.
-      default: 8
-      selector:
-        number:
-          min: 0
-          max: 24
-          step: 0.1
-          unit_of_measurement: h
+          max: 120
+          unit_of_measurement: minutes
 
 variables:
   telefoon: !input telefoon
-  werkzone: !input werkzone
-  notif_primair: !input notificatie_primair
-  notif_secundair: !input notificatie_secundair
-  calendar: !input calendar_werktijden
-  werktijd_dag: !input werktijd_dagduur
-  pauze_timeout: !input pauze_timeout
-  meld_drempel: !input werktijd_meld_drempel
+  werk_zone: !input werk_zone
+  notif1: !input notificatie_1
+  notif2: !input notificatie_2
+  kalender: !input calendar_werktijden
+  pauze_timeout: !input pauze_timeout_minuten
 
 trigger:
   - platform: state
     entity_id: !input telefoon
   - platform: time
-    at: "17:15:00"
-    weekday:
-      - fri
-
-condition: []
+    at: '17:15:00'
 
 action:
   - choose:
+      # Start werkdag als telefoon binnen zone komt en werkdag nog niet actief is
       - conditions:
-          - condition: trigger
-            id: state_change
           - condition: state
             entity_id: !input telefoon
-            state: "home"
-          - condition: state
-            entity_id: !input werkzone
-            state: "home"
-          - condition: time
-            weekday:
-              - mon
-              - tue
-              - wed
-              - thu
-              - fri
-        sequence:
-          - variables:
-              starttijd_helper: input_datetime.ilg_starttijd_werkdag
-              eindtijd_helper: input_datetime.ilg_eindtijd_werkdag
-              werkdag_actief: input_boolean.ilg_werkdag_actief
-              pauze_timer: timer.ilg_pauze_timer
-              dagtotaal_helper: input_number.ilg_dagtotaal_uren
-              weektotaal_helper: input_number.ilg_weektotaal_uren
-          # Start werkdag als die nog niet actief is
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: "{{ werkdag_actief }}"
-                    state: "off"
-                sequence:
-                  - service: input_boolean.turn_on
-                    target:
-                      entity_id: "{{ werkdag_actief }}"
-                  - service: input_datetime.set_datetime
-                    target:
-                      entity_id: "{{ starttijd_helper }}"
-                    data:
-                      datetime: "{{ now().isoformat() }}"
-                  - service: timer.cancel
-                    target:
-                      entity_id: "{{ pauze_timer }}"
-                  - service: input_number.set_value
-                    target:
-                      entity_id: "{{ dagtotaal_helper }}"
-                    data:
-                      value: 0
-          # Stop pauze timer indien die loopt
-          - service: timer.cancel
-            target:
-              entity_id: "{{ pauze_timer }}"
-
-  - choose:
-      - conditions:
-          - condition: trigger
-            id: state_change
-          - condition: not
-            conditions:
-              - condition: state
-                entity_id: !input telefoon
-                state: "home"
-          - condition: state
-            entity_id: !input werkzone
-            state: "not_home"
-          - condition: time
-            weekday:
-              - mon
-              - tue
-              - wed
-              - thu
-              - fri
-        sequence:
-          - variables:
-              werkdag_actief: input_boolean.ilg_werkdag_actief
-              pauze_timer: timer.ilg_pauze_timer
-              eindtijd_helper: input_datetime.ilg_eindtijd_werkdag
-              dagtotaal_helper: input_number.ilg_dagtotaal_uren
-          # Start pauze timer als werkdag actief is
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: "{{ werkdag_actief }}"
-                    state: "on"
-                sequence:
-                  - service: timer.start
-                    target:
-                      entity_id: "{{ pauze_timer }}"
-                    data:
-                      duration: "{{ pauze_timeout * 60 }}"
-  - choose:
-      - conditions:
-          - condition: event
-            event_type: timer.finished
-            event_data:
-              entity_id: timer.ilg_pauze_timer
+            state: 'home'
           - condition: state
             entity_id: input_boolean.ilg_werkdag_actief
-            state: "on"
+            state: 'off'
         sequence:
-          - variables:
-              eindtijd_helper: input_datetime.ilg_eindtijd_werkdag
-              werkdag_actief: input_boolean.ilg_werkdag_actief
-              dagtotaal_helper: input_number.ilg_dagtotaal_uren
-              weektotaal_helper: input_number.ilg_weektotaal_uren
-              calendar: calendar.werktijden
-          # Pauze timer afgelopen => werkdag stoppen
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.ilg_werkdag_actief
           - service: input_datetime.set_datetime
             target:
-              entity_id: "{{ eindtijd_helper }}"
+              entity_id: input_datetime.ilg_werkdag_starttijd
             data:
-              datetime: "{{ now().isoformat() }}"
-          - service: input_boolean.turn_off
-            target:
-              entity_id: "{{ werkdag_actief }}"
-          # Bereken werktijd vandaag in uren (eindtijd - starttijd)
-          - variables:
-              start: "{{ states(starttijd_helper).state }}"
-              eind: "{{ now().isoformat() }}"
-              werktijd_uren: >
-                {% set start_dt = as_datetime(start) %}
-                {% set eind_dt = as_datetime(eind) %}
-                {{ ((eind_dt - start_dt).total_seconds() / 3600) | round(2) }}
-          - service: input_number.set_value
-            target:
-              entity_id: "{{ dagtotaal_helper }}"
-            data:
-              value: "{{ werktijd_uren }}"
-          # Update weektotaal helper
-          - service: input_number.set_value
-            target:
-              entity_id: input_number.ilg_weektotaal_uren
-            data:
-              value: >
-                {{ (states('input_number.ilg_weektotaal_uren') | float + werktijd_uren) | round(2) }}
-          # Voeg werkdag begin event toe aan calendar
+              timestamp: "{{ now().timestamp() }}"
           - service: calendar.event_create
             data:
-              calendar_id: "{{ calendar }}"
-              start: "{{ starttijd_helper }}"
-              end: "{{ eindtijd_helper }}"
+              calendar_id: "{{ kalender }}"
+              start: "{{ now().isoformat() }}"
+              end: "{{ (now() + timedelta(minutes=30)).isoformat() }}"
               summary: "Werkdag start"
-          # Voeg werkdag einde event toe aan calendar
-          - service: calendar.event_create
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.ilg_uur_totaal_dag
             data:
-              calendar_id: "{{ calendar }}"
-              start: "{{ eindtijd_helper }}"
-              end: "{{ eindtijd_helper }}"
-              summary: "Werkdag einde"
-          # Voeg dagtotaal uren event toe aan calendar
-          - service: calendar.event_create
-            data:
-              calendar_id: "{{ calendar }}"
-              start: "{{ now().date().isoformat() }}T00:00:00"
-              end: "{{ now().date().isoformat() }}T23:59:59"
-              summary: "Werkuren vandaag: {{ werktijd_uren }} uur"
-  - choose:
+              value: 0
+
+      # Telefoon verlaat zone, start pauzetimer
       - conditions:
+          - condition: state
+            entity_id: !input telefoon
+            state: 'not_home'
+          - condition: state
+            entity_id: input_boolean.ilg_werkdag_actief
+            state: 'on'
+        sequence:
+          - wait_for_trigger:
+              - platform: state
+                entity_id: !input telefoon
+                to: 'home'
+            timeout: "{{ pauze_timeout * 60 }}"
+            continue_on_timeout: true
+          - choose:
+              # Pauze langer dan timeout, einde werkdag
+              - conditions:
+                  - condition: state
+                    entity_id: !input telefoon
+                    state: 'not_home'
+                sequence:
+                  - service: input_boolean.turn_off
+                    target:
+                      entity_id: input_boolean.ilg_werkdag_actief
+                  - service: input_datetime.set_datetime
+                    target:
+                      entity_id: input_datetime.ilg_werkdag_eindtijd
+                    data:
+                      timestamp: "{{ now().timestamp() }}"
+                  - service: calendar.event_create
+                    data:
+                      calendar_id: "{{ kalender }}"
+                      start: "{{ states('input_datetime.ilg_werkdag_starttijd') }}"
+                      end: "{{ now().isoformat() }}"
+                      summary: "Werkdag einde"
+                  - variables:
+                      dag_uren: "{{ ((as_timestamp(now()) - as_timestamp(states('input_datetime.ilg_werkdag_starttijd'))) / 3600) | round(2) }}"
+                  - service: input_number.set_value
+                    target:
+                      entity_id: input_number.ilg_uur_totaal_dag
+                    data:
+                      value: "{{ dag_uren }}"
+                  - service: input_number.set_value
+                    target:
+                      entity_id: input_number.ilg_uur_totaal_week
+                    data:
+                      value: "{{ (states('input_number.ilg_uur_totaal_week') | float) + dag_uren }}"
+                  - service: notify.notify
+                    data:
+                      message: "Je werkdag is beëindigd. Duur: {{ dag_uren }} uur."
+                      target:
+                        - "{{ notif1 }}"
+                        - "{{ notif2 }}"
+
+      # Notificatie na 8 uur aanwezigheid
+      - conditions:
+          - condition: state
+            entity_id: input_boolean.ilg_werkdag_actief
+            state: 'on'
           - condition: template
             value_template: >
-              {{ trigger.platform == 'state' and
-                 (states(!input.telefoon) == 'home') and
-                 (as_timestamp(now()) - as_timestamp(state_attr(!input.telefoon, 'last_changed')) < 60) }}
-          - condition: template
-            value_template: >
-              {{ (states('input_number.ilg_dagtotaal_uren') | float) >= meld_drempel }}
+              {{ (as_timestamp(now()) - as_timestamp(states('input_datetime.ilg_werkdag_starttijd'))) > (8 * 3600) }}
           - condition: time
             weekday:
               - mon
@@ -262,29 +165,30 @@ action:
         sequence:
           - service: notify.notify
             data:
-              message: "Je hebt bijna je werkdag van {{ werktijd_dag }} uur bereikt!"
+              message: "Je bent al 8 uur aan het werk. Je werkdag zit er bijna op!"
               target:
-                - "{{ notif_primair }}"
-                - "{{ notif_secundair }}"
-  - choose:
+                - "{{ notif1 }}"
+                - "{{ notif2 }}"
+
+      # Wekelijkse samenvatting vrijdag 17:15
       - conditions:
-          - condition: trigger
-            id: time
           - condition: time
             weekday:
               - fri
-            after: "17:15:00"
+          - condition: time
+            at: '17:15:00'
         sequence:
           - service: notify.notify
             data:
-              message: >
-                Het totaal aantal gewerkte uren deze week is {{ states('input_number.ilg_weektotaal_uren') }} uur.
+              message: "Deze week heb je in totaal {{ states('input_number.ilg_uur_totaal_week') }} uur gewerkt."
               target:
-                - "{{ notif_primair }}"
-                - "{{ notif_secundair }}"
-          # Reset weektotaal na vrijdag notificatie
+                - "{{ notif1 }}"
+                - "{{ notif2 }}"
           - service: input_number.set_value
             target:
-              entity_id: input_number.ilg_weektotaal_uren
+              entity_id: input_number.ilg_uur_totaal_week
             data:
               value: 0
+    default: []
+
+mode: single
