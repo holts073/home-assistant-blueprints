@@ -178,8 +178,6 @@ action:
             target:
               entity_id: notif_8u_boolean
 
----
-
 ilg_einde_werkdag:
   alias: ILG - Einde werkdag
   description: Beëindigt de werkdag, telt uren op, maakt kalender events en stuurt notificatie
