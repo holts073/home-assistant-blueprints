@@ -1,21 +1,21 @@
 blueprint:
-  name: ILG Werktijd bijhouden met pauze en notificaties
+  name: ILG Werktijd bijhouden met pauze timeout en notificaties
   description: >
-    Houd je werktijden bij op basis van aanwezigheid in een zone.
-    Inclusief pauzetimer, notificaties na 8 uur en wekelijkse samenvatting.
-    Start- en eindtijden worden in een kalender gezet.
+    Track je werktijden op basis van aanwezigheid in zone.ilg_enschede.
+    Met pauze timeout, notificaties na 8 uur, begin- en eindtijd in kalender,
+    mogelijkheid om starttijd handmatig aan te passen, en twee notificatie ontvangers.
   domain: automation
   input:
     telefoon:
       name: Telefoon device tracker
-      description: Device tracker van je telefoon die je werkzone bijhoudt
+      description: Je telefoon als device tracker entity
       selector:
         entity:
           domain: device_tracker
 
     werkzone:
       name: Werk zone
-      description: Zone waar je aanwezig moet zijn voor werktijd
+      description: De zone die aangeeft dat je aan het werk bent
       default: zone.ilg_enschede
       selector:
         entity:
@@ -23,14 +23,25 @@ blueprint:
 
     pauze_timeout:
       name: Pauze timeout (minuten)
-      description: Hoe lang mag je buiten de zone zijn zonder dat de werkdag eindigt
+      description: Tijd in minuten dat je buiten de werkzone kunt zijn zonder dat de werkdag stopt
       default: 30
       selector:
         number:
           min: 1
           max: 180
-          unit_of_measurement: minuten
+          unit_of_measurement: minutes
           mode: slider
+
+    werktijd_dag:
+      name: Standaard werktijd per dag (uur)
+      description: Het aantal uren dat je normaal werkt per dag
+      default: 8.5
+      selector:
+        number:
+          min: 1
+          max: 24
+          unit_of_measurement: hours
+          mode: box
 
     notificatie_1:
       name: Eerste notificatie ontvanger
@@ -47,185 +58,133 @@ blueprint:
         entity:
           domain: notify
 
-    kalender:
+    calendar_werktijden:
       name: Kalender voor werktijden
-      description: Kalender waar werkdag begint en eindigt worden toegevoegd
+      description: Kalender waarin begin- en eindtijden worden opgeslagen
       default: calendar.werktijden
       selector:
         entity:
           domain: calendar
 
-    werkdag_duur:
-      name: Duur werkdag (uren)
-      description: Aantal uren dat je werkt (standaard 8.5)
-      default: 8.5
-      selector:
-        number:
-          min: 1
-          max: 24
-          unit_of_measurement: uren
-          mode: box
-
-    week_helper:
-      name: Helper voor weektotaal uren
-      description: Helper (input_number) waarin de weektotaal uren worden opgeslagen
+    weektotaal_helper:
+      name: Helper voor weektotaal werktijd (uren)
+      description: Helper sensor (input_number) waarin het totaal van de week wordt bijgehouden
       selector:
         entity:
           domain: input_number
 
-    handmatige_starttijd:
-      name: Handmatige starttijd aanpassen
-      description: Optionele handmatige starttijd voor begin werkdag (ISO timestamp of leeg)
-      default: ''
+    handmatige_starttijd_helper:
+      name: Handmatige starttijd helper (input_datetime)
+      description: Helper om handmatig starttijd van de werkdag te corrigeren
       selector:
-        text:
+        entity:
+          domain: input_datetime
 
 variables:
   telefoon: !input telefoon
   werkzone: !input werkzone
-  pauze_timeout: !input pauze_timeout
+  pauze_timeout_min: !input pauze_timeout
+  werktijd_per_dag: !input werktijd_dag
   notificatie_1: !input notificatie_1
   notificatie_2: !input notificatie_2
-  kalender: !input kalender
-  werkdag_duur: !input werkdag_duur
-  week_helper: !input week_helper
-  handmatige_starttijd: !input handmatige_starttijd
+  calendar_werktijden: !input calendar_werktijden
+  weektotaal_helper: !input weektotaal_helper
+  handmatige_starttijd_helper: !input handmatige_starttijd_helper
 
 trigger:
   - platform: state
     entity_id: !input telefoon
-  - platform: time_pattern
-    minutes: '/1'  # Elke minuut live update
   - platform: time
-    at: '17:15:00'  # Vrijdag notificatie (condition check volgt)
+    at: "17:15:00"
+    weekday:
+      - fri
 
 condition:
-  - condition: time
-    weekday:
-      - mon
-      - tue
-      - wed
-      - thu
-      - fri
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: >
+          {{ is_state(trigger.entity_id, 'home') and
+             is_state_attr(werkzone, 'friendly_name', 'ilg_enschede') }}
+      - condition: time
+        weekday:
+          - mon
+          - tue
+          - wed
+          - thu
+          - fri
 
 action:
   - choose:
-      # Telefoon verlaat zone: start pauzetimer
       - conditions:
-          - condition: template
-            value_template: >
-              {{ trigger.to_state is not none and trigger.to_state.state == 'not_home' and
-                 trigger.entity_id == telefoon }}
-        sequence:
-          - wait_for_trigger:
-              - platform: state
-                entity_id: telefoon
-                to: 'home'
-            timeout: "{{ pauze_timeout * 60 }}"
-            continue_on_timeout: true
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: telefoon
-                    state: 'not_home'
-                sequence:
-                  # Werkdag beëindigen na pauzetijd overschreden
-                  - service: calendar.create_event
-                    data:
-                      entity_id: kalender
-                      summary: "Einde werkdag"
-                      start: "{{ now().isoformat() }}"
-                      end: "{{ now().isoformat() }}"
-                  - service: input_number.set_value
-                    target:
-                      entity_id: week_helper
-                    data:
-                      value: 0
-                  - service: notify.notify
-                    data:
-                      message: "Je werkdag is voorbij!"
-                      target:
-                        - "{{ notificatie_1 }}"
-                        - "{{ notificatie_2 }}"
-              - default: []
-
-      # Telefoon betreedt zone: start werkdag
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ trigger.to_state is not none and trigger.to_state.state == 'home' and
-                 trigger.entity_id == telefoon }}
+          - condition: trigger
+            id: "telefoon_in_werkzone"
+          - condition: state
+            entity_id: "{{ telefoon }}"
+            state: "home"
+          - condition: state
+            entity_id: "{{ werkzone }}"
+            state: "home"
         sequence:
           - variables:
               starttijd: >
-                {% if handmatige_starttijd != '' %}
-                  {{ handmatige_starttijd }}
+                {% set manual = states(handmatige_starttijd_helper) %}
+                {% if manual and manual != 'unavailable' and manual != 'unknown' %}
+                  {{ manual }}
                 {% else %}
                   {{ now().isoformat() }}
                 {% endif %}
           - service: calendar.create_event
             data:
-              entity_id: kalender
-              summary: "Begin werkdag"
+              calendar_id: "{{ calendar_werktijden }}"
+              summary: Werkdag gestart
               start: "{{ starttijd }}"
               end: "{{ starttijd }}"
-          - service: input_number.set_value
-            target:
-              entity_id: week_helper
+          - service: input_boolean.turn_on
+            entity_id: input_boolean.ILG_werkdag_actief
+          - service: notify.notify
             data:
-              value: 0
+              message: "Werkdag gestart om {{ starttijd }}"
 
-      # Elke minuut check werkduur en notificaties
       - conditions:
-          - condition: template
-            value_template: >
-              {{ (states(telefoon) == 'home') }}
+          - condition: trigger
+            id: "telefoon_verlaat_werkzone"
+          - condition: state
+            entity_id: "{{ telefoon }}"
+            state_not: "home"
+          - condition: state
+            entity_id: "{{ werkzone }}"
+            state_not: "home"
         sequence:
-          - variables:
-              # Starttijd pakken van handmatige input of laatste calendar event
-              starttijd: >
-                {% if handmatige_starttijd != '' %}
-                  {{ handmatige_starttijd }}
-                {% else %}
-                  {% set events = state_attr(kalender, 'events') %}
-                  {% if events and events | length > 0 %}
-                    {{ events[-1].start }}
-                  {% else %}
-                    {{ now().isoformat() }}
-                  {% endif %}
-                {% endif %}
-              duur_sec: >
-                {{ (as_timestamp(now()) - as_timestamp(starttijd)) | max(0) }}
-              duur_uren: "{{ (duur_sec / 3600) | round(2) }}"
-          - choose:
-              - conditions:
-                  - condition: numeric_state
-                    above: 8
-                    value_template: "{{ duur_uren }}"
-                sequence:
-                  - service: notify.notify
-                    data:
-                      message: "Je bent nu al {{ duur_uren }} uur aan het werk."
-                      target:
-                        - "{{ notificatie_1 }}"
-                        - "{{ notificatie_2 }}"
-              - default: []
+          - delay: "00:{{ pauze_timeout_min }}:00"
+          - condition: state
+            entity_id: "{{ telefoon }}"
+            state_not: "home"
+          - service: calendar.create_event
+            data:
+              calendar_id: "{{ calendar_werktijden }}"
+              summary: Werkdag beëindigd
+              start: "{{ now().isoformat() }}"
+              end: "{{ now().isoformat() }}"
+          - service: input_boolean.turn_off
+            entity_id: input_boolean.ILG_werkdag_actief
+          - service: notify.notify
+            data:
+              message: "Werkdag beëindigd om {{ now().strftime('%H:%M') }}"
 
-      # Vrijdag 17:15: stuur weektotaal notificatie
       - conditions:
-          - condition: time
+          - condition: trigger
+            platform: time
+            at: "17:15:00"
             weekday:
               - fri
-            after: '17:14:00'
-            before: '17:16:00'
         sequence:
           - service: notify.notify
             data:
               message: >
-                Je hebt deze week {{ states(week_helper) | float | round(2) }} uur gewerkt.
-              target:
-                - "{{ notificatie_1 }}"
-                - "{{ notificatie_2 }}"
-  default: []
+                Totaal uren gewerkt deze week: {{
+                states(weektotaal_helper) }} uur.
+
+    default: []
 
 mode: single
