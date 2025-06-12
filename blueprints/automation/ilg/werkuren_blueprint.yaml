@@ -18,15 +18,15 @@ blueprint:
       description: De hoofd notify service, bv notify.mobile_app_elmer
       default: notify.mobile_app_elmer
       selector:
-        text:
-          multiline: false
+        entity:
+          domain: notify
     notificatie_2:
       name: Tweede notificatie service (optioneel)
       description: Tweede notify service, leeg als niet gebruikt
       default: ''
       selector:
-        text:
-          multiline: false
+        entity:
+          domain: notify
     kalender:
       name: Werkuren kalender
       selector:
