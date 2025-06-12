@@ -64,6 +64,8 @@ trigger:
       - thu
       - fri
 
+condition: []
+
 action:
   - choose:
       - conditions:
@@ -161,3 +163,4 @@ action:
             target:
               entity_id: "{{ notif_8u_id }}"
 
+mode: single
