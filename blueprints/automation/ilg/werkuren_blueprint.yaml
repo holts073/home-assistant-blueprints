@@ -42,17 +42,17 @@ blueprint:
           domain: input_boolean
 
 variables:
-  telefoon: !input telefoon
-  werkzone: !input werkzone
-  notificatie: !input notificatie
-  kalender: !input kalender
-  pauze_timeout: !input pauze_timeout
-  handmatige_starttijd: !input handmatige_starttijd
-  notif_8u_boolean: !input notif_8u_boolean
+  telefoon_id: !input telefoon
+  werkzone_id: !input werkzone
+  notificatie_service: !input notificatie
+  kalender_id: !input kalender
+  pauze_timeout_value: !input pauze_timeout
+  handmatige_start_id: !input handmatige_starttijd
+  notif_8u_id: !input notif_8u_boolean
 
 trigger:
   - platform: state
-    entity_id: !input.telefoon
+    entity_id: "{{ telefoon_id }}"
   - platform: time_pattern
     minutes: '/5'
   - platform: time
@@ -77,7 +77,7 @@ action:
           - condition: template
             value_template: "{{ trigger.platform == 'time' }}"
         sequence:
-          - service: !input.notificatie
+          - service: "{{ notificatie_service }}"
             data:
               message: >
                 Weektotaal gewerkte uren: {{
@@ -90,7 +90,7 @@ action:
 
       - conditions:
           - condition: state
-            entity_id: !input.telefoon
+            entity_id: "{{ telefoon_id }}"
             state: 'home'
           - condition: template
             value_template: "{{ trigger.platform != 'time' }}"
@@ -101,23 +101,23 @@ action:
               value: 0
           - service: input_boolean.turn_off
             target:
-              entity_id: !input.notif_8u_boolean
-          - service: !input.notificatie
+              entity_id: "{{ notif_8u_id }}"
+          - service: "{{ notificatie_service }}"
             data:
               message: "Werkdag gestart."
 
       - conditions:
           - condition: state
-            entity_id: !input.telefoon
+            entity_id: "{{ telefoon_id }}"
             state: 'not_home'
           - condition: template
             value_template: "{{ trigger.platform != 'time' }}"
         sequence:
           - wait_for_trigger:
               - platform: state
-                entity_id: !input.telefoon
+                entity_id: "{{ telefoon_id }}"
                 to: 'home'
-            timeout: "{{ (pauze_timeout * 60) | int }}"
+            timeout: "{{ (pauze_timeout_value * 60) | int }}"
           - choose:
               - conditions:
                   - condition: template
@@ -125,18 +125,18 @@ action:
                 sequence:
                   - service: script.ilg_einde_werkdag
                     data:
-                      telefoon: "{{ telefoon }}"
-                      kalender: "{{ kalender }}"
-                      notificatie: "{{ notificatie }}"
-                      handmatige_starttijd: "{{ handmatige_starttijd }}"
+                      telefoon: "{{ telefoon_id }}"
+                      kalender: "{{ kalender_id }}"
+                      notificatie: "{{ notificatie_service }}"
+                      handmatige_starttijd: "{{ handmatige_start_id }}"
               - default:
-                  - service: !input.notificatie
+                  - service: "{{ notificatie_service }}"
                     data:
                       message: "Terug binnen pauze, werkdag loopt door."
 
       - default:
           - condition: state
-            entity_id: !input.telefoon
+            entity_id: "{{ telefoon_id }}"
             state: 'home'
           - service: input_number.increment
             data:
@@ -145,18 +145,19 @@ action:
 
       - conditions:
           - condition: state
-            entity_id: !input.telefoon
+            entity_id: "{{ telefoon_id }}"
             state: 'home'
           - condition: numeric_state
             entity_id: input_number.werktijd_vandaag
             above: 8
           - condition: state
-            entity_id: !input.notif_8u_boolean
+            entity_id: "{{ notif_8u_id }}"
             state: 'off'
         sequence:
-          - service: !input.notificatie
+          - service: "{{ notificatie_service }}"
             data:
               message: "Je bent nu 8 uur op werk, bijna klaar voor vandaag!"
           - service: input_boolean.turn_on
             target:
-              entity_id: !input.notif_8u_boolean
+              entity_id: "{{ notif_8u_id }}"
+
