@@ -16,7 +16,8 @@ blueprint:
     notificatie:
       name: Notificatie service
       selector:
-        action
+        text:
+          type: text
     kalender:
       name: Werkuren kalender
       selector:
