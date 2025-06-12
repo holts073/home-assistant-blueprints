@@ -1,73 +1,101 @@
 blueprint:
-  name: ILG – Werkuren bijhouden compleet
-  description: Houdt werktijd bij op basis van zone met pauze‑timeout, weekrapport, handmatige starttijd, en 8‑uur melding.
+  name: ILG Werktijd Tracker
+  description: Houd werktijden bij op basis van aanwezigheid in zone.ilg_enschede met pauze timeout en notificaties.
   domain: automation
   input:
     telefoon:
       name: Telefoon device tracker
+      description: Device tracker van je telefoon
       selector:
         entity:
           domain: device_tracker
     werkzone:
       name: Werkzone
+      description: Zone waarin je werkt
+      default: zone.ilg_enschede
       selector:
         entity:
           domain: zone
-    notificatie:
-      name: Hoofd notificatie service
-      description: De hoofd notify service, bv notify.mobile_app_elmer
-      default: notify.mobile_app_elmer
-      selector:
-        entity:
-          domain: notify
-    notificatie_2:
-      name: Tweede notificatie service (optioneel)
-      description: Tweede notify service, leeg als niet gebruikt
-      default: ''
-      selector:
-        entity:
-          domain: notify
     kalender:
-      name: Werkuren kalender
+      name: Kalender voor werkdag events
+      description: Kalender waarin werkdag begint en eindigt worden geregistreerd
       selector:
         entity:
           domain: calendar
+    notificatie:
+      name: Notificatie ontvanger 1
+      description: Eerste notificatie service
+      selector:
+        action: {}
+    notificatie_2:
+      name: Notificatie ontvanger 2 (optioneel)
+      description: Tweede notificatie service (leeg als niet gebruikt)
+      default: ''
+      selector:
+        action: {}
     pauze_timeout:
       name: Pauze timeout (minuten)
+      description: Max tijd afwezig in zone zonder dat werkdag stopt
       default: 30
       selector:
         number:
           min: 1
-          max: 180
-          unit_of_measurement: minuten
-    handmatige_starttijd:
-      name: Starttijd handmatig (optioneel)
+          max: 120
+          unit_of_measurement: min
+          mode: box
+    werktijd_vandaag:
+      name: Helper voor werktijd vandaag
+      description: Input_number helper om vandaag gewerkte uren bij te houden
       selector:
         entity:
-          domain: input_datetime
-    notif_8u_boolean:
-      name: Boolean voor 8‑uur notificatie
+          domain: input_number
+    werktijd_totaal_week:
+      name: Helper voor werktijd totaal week
+      description: Input_number helper om weektotaal uren bij te houden
+      selector:
+        entity:
+          domain: input_number
+    notif_8u:
+      name: Helper boolean voor 8u notificatie verstuurd
+      description: Input_boolean helper die bijhoudt of 8u notificatie is verstuurd
       selector:
         entity:
           domain: input_boolean
+    handmatige_starttijd:
+      name: Handmatige starttijd (optioneel)
+      description: Input_datetime helper om starttijd handmatig te zetten
+      selector:
+        entity:
+          domain: input_datetime
 
 variables:
-  telefoon_id: !input telefoon
-  werkzone_id: !input werkzone
-  notificatie_service: !input notificatie
-  notificatie_service_2: !input notificatie_2
-  kalender_id: !input kalender
-  pauze_timeout_value: !input pauze_timeout
-  handmatige_start_id: !input handmatige_starttijd
-  notif_8u_id: !input notif_8u_boolean
+  telefoon: !input telefoon
+  werkzone: !input werkzone
+  kalender: !input kalender
+  notificatie: !input notificatie
+  notificatie_2: !input notificatie_2
+  pauze_timeout: !input pauze_timeout
+  werktijd_vandaag: !input werktijd_vandaag
+  werktijd_totaal_week: !input werktijd_totaal_week
+  notif_8u: !input notif_8u
+  handmatige_starttijd: !input handmatige_starttijd
 
 trigger:
   - platform: state
-    entity_id: "{{ telefoon_id }}"
-  - platform: time_pattern
-    minutes: '/5'
+    entity_id: !input telefoon
+    from: 'not_home'
+    to: !input werkzone
+  - platform: state
+    entity_id: !input telefoon
+    from: !input werkzone
+    to: 'not_home'
   - platform: time
     at: '17:15:00'
+  - platform: time_pattern
+    minutes: /1
+
+condition:
+  - condition: time
     weekday:
       - mon
       - tue
@@ -75,139 +103,102 @@ trigger:
       - thu
       - fri
 
-condition: []
-
 action:
   - choose:
       - conditions:
-          - condition: time
-            weekday:
-              - mon
-              - tue
-              - wed
-              - thu
-              - fri
-          - condition: template
-            value_template: "{{ trigger.platform == 'time' }}"
-        sequence:
-          - service: "{{ notificatie_service }}"
-            data:
-              message: >
-                Weektotaal gewerkte uren: {{
-                  states('input_number.werktijd_totaal_week') | float | round(2)
-                }} uur.
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notificatie_service_2 != '' }}"
-                sequence:
-                  - service: "{{ notificatie_service_2 }}"
-                    data:
-                      message: >
-                        Weektotaal gewerkte uren: {{
-                          states('input_number.werktijd_totaal_week') | float | round(2)
-                        }} uur.
-          - service: input_number.set_value
-            data:
-              entity_id: input_number.werktijd_totaal_week
-              value: 0
-
-      - conditions:
           - condition: state
-            entity_id: "{{ telefoon_id }}"
-            state: 'home'
-          - condition: template
-            value_template: "{{ trigger.platform != 'time' }}"
+            entity_id: !input telefoon
+            state: !input werkzone
         sequence:
-          - service: input_number.set_value
+          - variables:
+              starttijd: >
+                {% if states(handmatige_starttijd) not in ['unknown','unavailable',''] and states(handmatige_starttijd) %}
+                  {{ states(handmatige_starttijd) }}
+                {% else %}
+                  {{ state_attr(telefoon, 'last_updated') }}
+                {% endif %}
+              laatste_verlaten: >
+                {% set last_left = state_attr(telefoon, 'last_changed') %}
+                {{ last_left }}
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: handmatige_starttijd
             data:
-              entity_id: input_number.werktijd_vandaag
+              timestamp: "{{ now().timestamp() }}"
+          - service: input_number.set_value
+            target:
+              entity_id: werktijd_vandaag
+            data:
               value: 0
           - service: input_boolean.turn_off
             target:
-              entity_id: "{{ notif_8u_id }}"
-          - service: "{{ notificatie_service }}"
-            data:
-              message: "Werkdag gestart."
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notificatie_service_2 != '' }}"
-                sequence:
-                  - service: "{{ notificatie_service_2 }}"
-                    data:
-                      message: "Werkdag gestart."
+              entity_id: notif_8u
 
       - conditions:
           - condition: state
-            entity_id: "{{ telefoon_id }}"
+            entity_id: !input telefoon
             state: 'not_home'
-          - condition: template
-            value_template: "{{ trigger.platform != 'time' }}"
         sequence:
-          - wait_for_trigger:
-              - platform: state
-                entity_id: "{{ telefoon_id }}"
-                to: 'home'
-            timeout: "{{ (pauze_timeout_value * 60) | int }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ wait.trigger is none }}"
-                sequence:
-                  - service: script.ilg_einde_werkdag
-                    data:
-                      telefoon: "{{ telefoon_id }}"
-                      kalender: "{{ kalender_id }}"
-                      notificatie: "{{ notificatie_service }}"
-                      notificatie_2: "{{ notificatie_service_2 }}"
-                      handmatige_starttijd: "{{ handmatige_start_id }}"
-              - default:
-                  - service: "{{ notificatie_service }}"
-                    data:
-                      message: "Terug binnen pauze, werkdag loopt door."
-                  - choose:
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ notificatie_service_2 != '' }}"
-                        sequence:
-                          - service: "{{ notificatie_service_2 }}"
-                            data:
-                              message: "Terug binnen pauze, werkdag loopt door."
-
-      - default:
+          - delay: "00:{{ '%02d' | format(pauze_timeout) }}:00"
           - condition: state
-            entity_id: "{{ telefoon_id }}"
-            state: 'home'
-          - service: input_number.increment
+            entity_id: !input telefoon
+            state: 'not_home'
+          - variables:
+              starttijd: >
+                {% if states(handmatige_starttijd) not in ['unknown','unavailable',''] and states(handmatige_starttijd) %}
+                  {{ states(handmatige_starttijd) }}
+                {% else %}
+                  {{ state_attr(telefoon, 'last_updated') }}
+                {% endif %}
+              eindtijd: "{{ now().isoformat() }}"
+              duur_uren: >
+                {% set start = as_timestamp(starttijd) %}
+                {% set einde = as_timestamp(now()) %}
+                {{ ((einde - start) / 3600) | round(2) }}
+          - service: script.ilg_einde_werkdag
             data:
-              entity_id: input_number.werktijd_vandaag
-              amount: 0.0833
+              telefoon: telefoon
+              kalender: kalender
+              notificatie: notificatie
+              notificatie_2: notificatie_2
+              handmatige_starttijd: handmatige_starttijd
+              duur_uren: duur_uren
+
+      - conditions:
+          - condition: time
+            at: '17:15:00'
+        sequence:
+          - service: notify.mobile_app_elmer
+            data:
+              message: >
+                De totaal gewerkte uren deze week zijn {{ states(werktijd_totaal_week) }} uur.
 
       - conditions:
           - condition: state
-            entity_id: "{{ telefoon_id }}"
-            state: 'home'
-          - condition: numeric_state
-            entity_id: input_number.werktijd_vandaag
-            above: 8
-          - condition: state
-            entity_id: "{{ notif_8u_id }}"
-            state: 'off'
+            entity_id: !input telefoon
+            state: !input werkzone
         sequence:
-          - service: "{{ notificatie_service }}"
+          - service: input_number.set_value
+            target:
+              entity_id: werktijd_vandaag
             data:
-              message: "Je bent nu 8 uur op werk, bijna klaar voor vandaag!"
+              value: >
+                {% set start = as_timestamp(states(handmatige_starttijd)) if states(handmatige_starttijd) not in ['unknown','unavailable',''] else as_timestamp(state_attr(telefoon, 'last_updated')) %}
+                {% set nu = as_timestamp(now()) %}
+                {{ ((nu - start) / 3600) | round(2) }}
           - choose:
               - conditions:
-                  - condition: template
-                    value_template: "{{ notificatie_service_2 != '' }}"
+                  - condition: numeric_state
+                    entity_id: werktijd_vandaag
+                    above: 8
+                  - condition: state
+                    entity_id: notif_8u
+                    state: 'off'
                 sequence:
-                  - service: "{{ notificatie_service_2 }}"
+                  - service: notify.mobile_app_elmer
                     data:
-                      message: "Je bent nu 8 uur op werk, bijna klaar voor vandaag!"
-          - service: input_boolean.turn_on
-            target:
-              entity_id: "{{ notif_8u_id }}"
-
-mode: single
+                      message: "Je werkdag duurt al meer dan 8 uur."
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: notif_8u
+  default: []
