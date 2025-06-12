@@ -1,196 +1,176 @@
 blueprint:
-  name: ILG Werktijden bijhouden met pauze timeout en notificaties (handmatige notify input)
-  description: >
-    Houdt je werkuren bij op basis van aanwezigheid in een zone met pauze timeout.
-    Stuurt notificaties na 8 uur en op vrijdag totaal, en schrijft begin en eindtijden in calendar.
+  name: ILG - Werktijdregistratie met zone en notificaties
+  description: Houdt werktijd bij op basis van zone. Stuurt meldingen, registreert agenda-items en houdt weektotaal bij.
   domain: automation
   input:
     telefoon:
-      name: Telefoon entity
-      description: De device_tracker of person entity van je telefoon
+      name: Telefoon (person entity)
       selector:
         entity:
-          domain: device_tracker
-    werkzone:
+          domain: person
+
+    zone:
       name: Werkzone
-      description: Zone waar je telefoon moet zijn om te registreren als werken
       selector:
         entity:
           domain: zone
-    kalender:
-      name: Werktijden kalender
-      description: Kalender waarin begin- en eindtijd worden opgeslagen
+
+    calendar:
+      name: Werktijd kalender
       selector:
         entity:
           domain: calendar
+
+    notify_1:
+      name: Eerste notificatie ontvanger
+      description: Entity ID van eerste notify-ontvanger (bijv. notify.mobile_app_elmer)
+      selector:
+        text:
+
+    notify_2:
+      name: Tweede notificatie ontvanger (optioneel)
+      default: ""
+      selector:
+        text:
+
+    weektotaal_helper:
+      name: Helper - ILG Weektotaal
+      selector:
+        entity:
+          domain: input_number
+
+    actief_helper:
+      name: Helper - Werktijd actief
+      selector:
+        entity:
+          domain: input_boolean
+
+    start_helper:
+      name: Helper - Werktijd start
+      selector:
+        entity:
+          domain: input_datetime
+
+    einde_helper:
+      name: Helper - Werktijd einde
+      selector:
+        entity:
+          domain: input_datetime
+
     pauze_timeout:
-      name: Pauze timeout (minuten)
-      description: Tijd in minuten waarna verlaten zone als einde werkdag wordt gezien (pauze)
+      name: Pauze timeout in minuten
+      description: Tijd waarin een afwezigheid géén einde werkdag betekent
       default: 30
       selector:
         number:
           min: 1
           max: 180
-          unit_of_measurement: minutes
-    notificatie_1:
-      name: Eerste notificatie ontvanger
-      description: Vul hier je notificatie entiteit in, bijvoorbeeld notify.mobile_app_elmer
-      selector:
-        text:
-    notificatie_2:
-      name: Tweede notificatie ontvanger (optioneel)
-      description: Vul hier een tweede notificatie entiteit in, of laat leeg
-      default: ""
-      selector:
-        text:
-    werktijd_helper:
-      name: Helper voor weektotaal werktijd (in seconden)
-      description: Helper die het totaal aantal gewerkte seconden per week bijhoudt
-      selector:
-        entity:
-          domain: input_number
-    begintijd_helper:
-      name: Handmatige begintijd helper
-      description: Helper voor handmatig aanpassen van begintijd (optie)
-      selector:
-        entity:
-          domain: input_datetime
+          unit_of_measurement: minuten
+          mode: slider
 
-variables:
-  telefoon: !input telefoon
-  werkzone: !input werkzone
-  kalender: !input kalender
-  pauze_timeout: !input pauze_timeout
-  notificatie_1: !input notificatie_1
-  notificatie_2: !input notificatie_2
-  werktijd_helper: !input werktijd_helper
-  begintijd_helper: !input begintijd_helper
+    notificatie_uur:
+      name: Notificatie na 8 uur?
+      default: true
+      selector:
+        boolean:
 
 trigger:
   - platform: state
     entity_id: !input telefoon
+    to: "home"
+  - platform: state
+    entity_id: !input telefoon
+    to: "not_home"
   - platform: time
     at: "17:15:00"
-    weekday:
-      - fri
-
 condition: []
-
 action:
   - choose:
-      # Start werkdag als telefoon zone betreedt op een werkdag
       - conditions:
           - condition: state
-            entity_id: "{{ telefoon }}"
+            entity_id: !input telefoon
             state: "home"
           - condition: state
-            entity_id: "{{ werkzone }}"
-            state: "home"
-          - condition: time
-            weekday:
-              - mon
-              - tue
-              - wed
-              - thu
-              - fri
+            entity_id: !input actief_helper
+            state: "off"
         sequence:
-          - service: calendar.create_event
-            data:
-              calendar_id: "{{ kalender }}"
-              start: "{{ now().isoformat() }}"
-              end: "{{ (now() + timedelta(hours=8, minutes=30)).isoformat() }}"
-              summary: "Werkdag start"
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input actief_helper
           - service: input_datetime.set_datetime
+            target:
+              entity_id: !input start_helper
             data:
-              entity_id: "{{ begintijd_helper }}"
-              datetime: "{{ now().isoformat() }}"
-          - service: input_number.set_value
-            data:
-              entity_id: "{{ werktijd_helper }}"
-              value: 0
+              timestamp: "{{ now().timestamp() }}"
           - service: notify.notify
             data:
-              message: "Werkdag gestart"
-  - choose:
-      # Einde werkdag na verlaten zone langer dan pauze_timeout (alleen werkdagen)
+              message: "Werkdag gestart."
+              target: [!input notify_1, !input notify_2]
       - conditions:
           - condition: state
-            entity_id: "{{ telefoon }}"
+            entity_id: !input telefoon
             state: "not_home"
+          - condition: state
+            entity_id: !input actief_helper
+            state: "on"
           - condition: template
             value_template: >
-              {{ (now() - states[telefoon].last_changed).total_seconds() > (pauze_timeout * 60) }}
-          - condition: time
-            weekday:
-              - mon
-              - tue
-              - wed
-              - thu
-              - fri
+              {{ (now().timestamp() - (states[inputs.telefoon].last_changed | as_timestamp)) > (inputs.pauze_timeout * 60) }}
         sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input actief_helper
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: !input einde_helper
+            data:
+              timestamp: "{{ now().timestamp() }}"
+          - variables:
+              start: "{{ states[inputs.start_helper].state | as_datetime }}"
+              einde: "{{ now() }}"
+              duur: "{{ (einde - start).total_seconds() / 3600 | round(2) }}"
+          - service: input_number.set_value
+            target:
+              entity_id: !input weektotaal_helper
+            data:
+              value: >
+                {{ (states[inputs.weektotaal_helper].state | float(0)) + duur }}
           - service: calendar.create_event
             data:
-              calendar_id: "{{ kalender }}"
-              start: "{{ states[begintijd_helper].state }}"
-              end: "{{ now().isoformat() }}"
-              summary: "Werkdag einde"
+              entity_id: !input calendar
+              start: "{{ start.isoformat() }}"
+              end: "{{ einde.isoformat() }}"
+              summary: "Werktijd ({{ duur }} uur)"
           - service: notify.notify
             data:
-              message: "Werkdag afgesloten"
-  - choose:
-      # Notificatie na 8 uur werken
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ (now() - states[begintijd_helper].state | as_datetime).total_seconds() >= 8 * 3600 }}
-          - condition: state
-            entity_id: "{{ telefoon }}"
-            state: "home"
-          - condition: state
-            entity_id: "{{ werkzone }}"
-            state: "home"
-        sequence:
-          - service: notify.service
-            data:
-              message: "Je werkdag is bijna voorbij (8 uur gewerkt)."
-              target: 
-                - "{{ notificatie_1 }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notificatie_2 != '' }}"
-                sequence:
-                  - service: notify.service
-                    data:
-                      message: "Je werkdag is bijna voorbij (8 uur gewerkt)."
-                      target:
-                        - "{{ notificatie_2 }}"
-  - choose:
-      # Wekelijkse notificatie vrijdag 17:15 met totaal gewerkte uren
+              message: "Werkdag geëindigd. Totaal vandaag: {{ duur }} uur"
+              target: [!input notify_1, !input notify_2]
       - conditions:
           - condition: time
-            at: "17:15:00"
-          - condition: state
-            entity_id: "{{ werktijd_helper }}"
+            weekday:
+              - fri
+          - condition: template
+            value_template: "{{ now().hour == 17 and now().minute == 15 }}"
         sequence:
-          - service: notify.service
+          - service: notify.notify
             data:
-              message: >
-                Je hebt deze week {{ (states[werktijd_helper].state | float / 3600) | round(2) }} uur gewerkt.
-              target:
-                - "{{ notificatie_1 }}"
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ notificatie_2 != '' }}"
-                sequence:
-                  - service: notify.service
-                    data:
-                      message: >
-                        Je hebt deze week {{ (states[werktijd_helper].state | float / 3600) | round(2) }} uur gewerkt.
-                      target:
-                        - "{{ notificatie_2 }}"
-          - service: input_number.set_value
+              message: "Weekoverzicht: totaal gewerkt: {{ states[inputs.weektotaal_helper].state }} uur"
+              target: [!input notify_1, !input notify_2]
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input actief_helper
+            state: "on"
+          - condition: template
+            value_template: >
+              {{ now() >= (states[inputs.start_helper].state | as_datetime + timedelta(hours=8)) }}
+          - condition: template
+            value_template: >
+              {{ inputs.notificatie_uur }}
+        sequence:
+          - service: notify.notify
             data:
-              entity_id: "{{ werktijd_helper }}"
-              value: 0
+              message: "Je bent al 8 uur aan het werk. Bijna tijd om af te sluiten."
+              target: [!input notify_1, !input notify_2]
+mode: single
+
